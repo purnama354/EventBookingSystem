@@ -125,10 +125,15 @@ func generateJWT(userID string, isAdmin bool) (string, error) {
 		return "", fmt.Errorf("JWT_SECRET is not set")
 	}
 
+	role := "user"
+	if isAdmin {
+		role = "admin"
+	}
+
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"userID":  userID,
-		"exp":     time.Now().Add(time.Hour * 24).Unix(), // Token expires in 24 hours
-		"isAdmin": isAdmin,                               //  isAdmin claim
+		"userID": userID,
+		"exp":    time.Now().Add(time.Hour * 24).Unix(),
+		"role":   role,
 	})
 
 	// Sign the token with the secret key
