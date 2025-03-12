@@ -1,0 +1,26 @@
+# .air.toml
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./server.exe ./cmd/server"
+bin = "server.exe"
+full_bin = "./server.exe"
+include_ext = ["go", "tpl", "html"]
+exclude_dir = ["tmp", "vendor", "node_modules"]
+exclude_file = []
+exclude_regex = ["_test.go"]
+log = "air.log"
+time = true
+
+[log]
+main_only = false
+
+[color]
+main = "magenta"
+watcher = "cyan"
+build = "yellow"
+runner = "green"
+
+[misc]
+clean_on_exit = true
