@@ -5,7 +5,7 @@ import (
 	"net/http"
 )
 
-// RequirePermission creates a middleware that checks for a specific permission
+// creates a middleware that checks for a specific permission
 func RequirePermission(permission string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +27,7 @@ func RequirePermission(permission string) func(http.Handler) http.Handler {
 	}
 }
 
-// AdminMiddleware checks if the user has admin role
+// checks if the user has admin role
 func AdminMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		role, ok := r.Context().Value(UserRoleKey).(string)

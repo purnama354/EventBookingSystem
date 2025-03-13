@@ -3,6 +3,7 @@ package users
 import (
 	"encoding/json"
 	"eventBookingSystem/internal/middleware"
+	"eventBookingSystem/internal/types"
 	"fmt"
 	"log"
 	"net/http"
@@ -22,9 +23,10 @@ func NewUserHandler(userService UserService) *UserHandler {
 	return &UserHandler{UserService: userService}
 }
 
+// Update the Register method to use standardized responses
 func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		types.SendError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", nil)
 		return
 	}
 
@@ -35,44 +37,54 @@ func (h *UserHandler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		types.SendError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body", nil)
 		return
 	}
 
-	// Input validation
+	// Input validation with detailed error messages
+	validationErrors := make(map[string]string)
+
 	if strings.TrimSpace(req.Username) == "" {
-		http.Error(w, "Username is required", http.StatusBadRequest)
-		return
+		validationErrors["username"] = "Username is required"
+	} else if len(req.Username) < 3 {
+		validationErrors["username"] = "Username must be at least 3 characters long"
 	}
 
 	if strings.TrimSpace(req.Email) == "" {
-		http.Error(w, "Email is required", http.StatusBadRequest)
-		return
-	}
-
-	if _, err := mail.ParseAddress(req.Email); err != nil {
-		http.Error(w, "Invalid email format", http.StatusBadRequest)
-		return
+		validationErrors["email"] = "Email is required"
+	} else if _, err := mail.ParseAddress(req.Email); err != nil {
+		validationErrors["email"] = "Invalid email format"
 	}
 
 	if len(req.Password) < 8 {
-		http.Error(w, "Password must be at least 8 characters long", http.StatusBadRequest)
+		validationErrors["password"] = "Password must be at least 8 characters long"
+	}
+
+	if len(validationErrors) > 0 {
+		types.SendError(w, http.StatusBadRequest, "VALIDATION_FAILED", "Validation failed", validationErrors)
 		return
 	}
 
 	user, err := h.UserService.CreateUser(req.Username, req.Email, req.Password, "user")
 	if err != nil {
-		http.Error(w, "Failed to create user", http.StatusInternalServerError)
+		types.SendError(w, http.StatusInternalServerError, "REGISTRATION_FAILED", "Failed to create user", nil)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	// Return just the public user info, not including password hash
+	userData := map[string]interface{}{
+		"id":       user.ID,
+		"username": user.Username,
+		"email":    user.Email,
+		"role":     user.Role,
+	}
+
+	types.SendSuccess(w, http.StatusCreated, "User registered successfully", userData)
 }
 
 func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		types.SendError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", nil)
 		return
 	}
 
@@ -82,27 +94,54 @@ func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		types.SendError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body", nil)
+		return
+	}
+
+	// Validate input
+	validationErrors := make(map[string]string)
+
+	if strings.TrimSpace(req.Email) == "" {
+		validationErrors["email"] = "Email is required"
+	}
+
+	if strings.TrimSpace(req.Password) == "" {
+		validationErrors["password"] = "Password is required"
+	}
+
+	if len(validationErrors) > 0 {
+		types.SendError(w, http.StatusBadRequest, "VALIDATION_FAILED", "Validation failed", validationErrors)
 		return
 	}
 
 	user, err := h.UserService.Login(req.Email, req.Password)
 	if err != nil {
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		types.SendError(w, http.StatusUnauthorized, "INVALID_CREDENTIALS", "Invalid email or password", nil)
 		return
 	}
 
 	// Generate JWT token
 	token, err := generateJWT(user.ID, user.Role == "admin")
 	if err != nil {
-		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
+		types.SendError(w, http.StatusInternalServerError, "TOKEN_GENERATION_FAILED", "Failed to generate token", nil)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"token": token})
+	// Return user data and token
+	responseData := map[string]interface{}{
+		"token": token,
+		"user": map[string]interface{}{
+			"id":       user.ID,
+			"username": user.Username,
+			"email":    user.Email,
+			"role":     user.Role,
+		},
+	}
+
+	types.SendSuccess(w, http.StatusOK, "Login successful", responseData)
 }
 
+// Updated GetProfile handler
 func (h *UserHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	// Get the user ID from the request context
 	userID := r.Context().Value(middleware.UserIDKey).(string)
@@ -110,12 +149,19 @@ func (h *UserHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	// Get the user from the database
 	user, err := h.UserService.GetUserByID(userID)
 	if err != nil {
-		http.Error(w, "User not found", http.StatusNotFound)
+		types.SendError(w, http.StatusNotFound, "USER_NOT_FOUND", "User not found", nil)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	// Return user data without password hash
+	userData := map[string]interface{}{
+		"id":       user.ID,
+		"username": user.Username,
+		"email":    user.Email,
+		"role":     user.Role,
+	}
+
+	types.SendSuccess(w, http.StatusOK, "Profile retrieved successfully", userData)
 }
 
 func generateJWT(userID string, isAdmin bool) (string, error) {
@@ -145,9 +191,10 @@ func generateJWT(userID string, isAdmin bool) (string, error) {
 	return tokenString, nil
 }
 
+// Updated CreateAdmin handler
 func (h *UserHandler) CreateAdmin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		types.SendError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", nil)
 		return
 	}
 
@@ -158,62 +205,71 @@ func (h *UserHandler) CreateAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		types.SendError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body", nil)
 		return
 	}
 
-	// Input validation
+	// Input validation with detailed error messages
+	validationErrors := make(map[string]string)
+
 	if strings.TrimSpace(req.Username) == "" {
-		http.Error(w, "Username is required", http.StatusBadRequest)
-		return
+		validationErrors["username"] = "Username is required"
+	} else if len(req.Username) < 3 {
+		validationErrors["username"] = "Username must be at least 3 characters long"
 	}
 
 	if strings.TrimSpace(req.Email) == "" {
-		http.Error(w, "Email is required", http.StatusBadRequest)
-		return
-	}
-
-	if _, err := mail.ParseAddress(req.Email); err != nil {
-		http.Error(w, "Invalid email format", http.StatusBadRequest)
-		return
+		validationErrors["email"] = "Email is required"
+	} else if _, err := mail.ParseAddress(req.Email); err != nil {
+		validationErrors["email"] = "Invalid email format"
 	}
 
 	if len(req.Password) < 8 {
-		http.Error(w, "Password must be at least 8 characters long", http.StatusBadRequest)
+		validationErrors["password"] = "Password must be at least 8 characters long"
+	}
+
+	if len(validationErrors) > 0 {
+		types.SendError(w, http.StatusBadRequest, "VALIDATION_FAILED", "Validation failed", validationErrors)
 		return
 	}
 
 	user, err := h.UserService.CreateUser(req.Username, req.Email, req.Password, "admin")
 	if err != nil {
-		http.Error(w, "Failed to create admin user", http.StatusInternalServerError)
+		types.SendError(w, http.StatusInternalServerError, "ADMIN_CREATION_FAILED", "Failed to create admin user", nil)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	// Return admin user data without password hash
+	userData := map[string]interface{}{
+		"id":       user.ID,
+		"username": user.Username,
+		"email":    user.Email,
+		"role":     user.Role,
+	}
+
+	types.SendSuccess(w, http.StatusCreated, "Admin user created successfully", userData)
 }
 
+// Updated Setup handler
 func (h *UserHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	// Only allow POST method
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		types.SendError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", nil)
 		return
 	}
 
 	// Check if system is already initialized
 	users, err := h.UserService.GetAllUsers()
 	if err != nil {
-		http.Error(w, "Failed to check system initialization status", http.StatusInternalServerError)
+		types.SendError(w, http.StatusInternalServerError, "SYSTEM_CHECK_FAILED", "Failed to check system initialization status", nil)
 		return
 	}
 
 	if len(users) > 0 {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success":     false,
-			"message":     "System is already initialized",
+		responseData := map[string]interface{}{
 			"initialized": true,
-		})
+		}
+		types.SendSuccess(w, http.StatusOK, "System is already initialized", responseData)
 		return
 	}
 
@@ -224,12 +280,7 @@ func (h *UserHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"error":   "Invalid request format",
-			"details": err.Error(),
-		})
+		types.SendError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request format", nil)
 		return
 	}
 
@@ -255,12 +306,7 @@ func (h *UserHandler) Setup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(validationErrors) > 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"errors":  validationErrors,
-		})
+		types.SendError(w, http.StatusBadRequest, "VALIDATION_FAILED", "Validation failed", validationErrors)
 		return
 	}
 
@@ -272,35 +318,19 @@ func (h *UserHandler) Setup(w http.ResponseWriter, r *http.Request) {
 		"admin", // First user is always admin
 	)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"error":   "Failed to create admin user",
-			"details": err.Error(),
-		})
+		types.SendError(w, http.StatusInternalServerError, "ADMIN_CREATION_FAILED", "Failed to create admin user", nil)
 		return
 	}
 
 	// Generate token for the new admin
 	token, err := generateJWT(user.ID, true)
 	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": false,
-			"error":   "Failed to generate authentication token",
-			"details": err.Error(),
-		})
+		types.SendError(w, http.StatusInternalServerError, "TOKEN_GENERATION_FAILED", "Failed to generate authentication token", nil)
 		return
 	}
 
 	// Return success response with user details and token
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": "System initialized successfully",
+	responseData := map[string]interface{}{
 		"user": map[string]interface{}{
 			"id":       user.ID,
 			"username": user.Username,
@@ -308,5 +338,7 @@ func (h *UserHandler) Setup(w http.ResponseWriter, r *http.Request) {
 			"role":     user.Role,
 		},
 		"token": token,
-	})
+	}
+
+	types.SendSuccess(w, http.StatusCreated, "System initialized successfully", responseData)
 }

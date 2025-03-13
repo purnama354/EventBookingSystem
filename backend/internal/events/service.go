@@ -12,6 +12,7 @@ type EventService interface {
 	GetAllEvents() ([]Event, error)
 	UpdateEvent(event *Event) error
 	DeleteEvent(id string) error
+	SearchEvents(search string, startDate, endDate *time.Time, minSeats *int) ([]Event, error)
 }
 
 type EventServiceImpl struct {
@@ -58,4 +59,14 @@ func (s *EventServiceImpl) UpdateEvent(event *Event) error {
 
 func (s *EventServiceImpl) DeleteEvent(id string) error {
 	return s.EventRepository.Delete(id)
+}
+
+func (s *EventServiceImpl) SearchEvents(search string, startDate, endDate *time.Time, minSeats *int) ([]Event, error) {
+	filter := EventFilter{
+		Search:    search,
+		StartDate: startDate,
+		EndDate:   endDate,
+		MinSeats:  minSeats,
+	}
+	return s.EventRepository.Search(filter)
 }

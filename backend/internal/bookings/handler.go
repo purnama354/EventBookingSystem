@@ -3,6 +3,7 @@ package bookings
 import (
 	"encoding/json"
 	"eventBookingSystem/internal/middleware"
+	"eventBookingSystem/internal/types"
 	"fmt"
 	"net/http"
 	"strings"
@@ -20,7 +21,7 @@ func NewBookingHandler(bookingService BookingService) *BookingHandler {
 
 func (h *BookingHandler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		types.SendError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", nil)
 		return
 	}
 
@@ -30,18 +31,23 @@ func (h *BookingHandler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		types.SendError(w, http.StatusBadRequest, "INVALID_REQUEST", "Invalid request body", nil)
 		return
 	}
 
 	// Input validation
+	validationErrors := make(map[string]string)
+
 	if _, err := uuid.Parse(req.EventID); err != nil {
-		http.Error(w, "Invalid event ID", http.StatusBadRequest)
-		return
+		validationErrors["eventID"] = "Invalid event ID format"
 	}
 
 	if req.Seats <= 0 {
-		http.Error(w, "Seats must be a positive integer", http.StatusBadRequest)
+		validationErrors["seats"] = "Seats must be a positive integer"
+	}
+
+	if len(validationErrors) > 0 {
+		types.SendError(w, http.StatusBadRequest, "VALIDATION_FAILED", "Validation failed", validationErrors)
 		return
 	}
 
@@ -50,40 +56,38 @@ func (h *BookingHandler) CreateBooking(w http.ResponseWriter, r *http.Request) {
 
 	booking, err := h.BookingService.CreateBooking(userID, req.EventID, req.Seats)
 	if err != nil {
-		http.Error(w, "Failed to create booking", http.StatusInternalServerError)
+		types.SendError(w, http.StatusInternalServerError, "BOOKING_FAILED", "Failed to create booking", nil)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(booking)
+	types.SendSuccess(w, http.StatusCreated, "Booking created successfully", booking)
 }
 
 func (h *BookingHandler) GetBookingByID(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) != 4 {
-		http.Error(w, "Invalid URL", http.StatusBadRequest)
+		types.SendError(w, http.StatusBadRequest, "INVALID_URL", "Invalid URL format", nil)
 		return
 	}
 
 	bookingID := parts[3]
 	if bookingID == "" {
-		http.Error(w, "Booking ID is required", http.StatusBadRequest)
+		types.SendError(w, http.StatusBadRequest, "MISSING_ID", "Booking ID is required", nil)
 		return
 	}
 
 	if _, err := uuid.Parse(bookingID); err != nil {
-		http.Error(w, "Invalid booking ID", http.StatusBadRequest)
+		types.SendError(w, http.StatusBadRequest, "INVALID_ID", "Invalid booking ID format", nil)
 		return
 	}
 
 	booking, err := h.BookingService.GetBookingByID(bookingID)
 	if err != nil {
-		http.Error(w, "Booking not found", http.StatusNotFound)
+		types.SendError(w, http.StatusNotFound, "BOOKING_NOT_FOUND", "Booking not found", nil)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(booking)
+	types.SendSuccess(w, http.StatusOK, "Booking retrieved successfully", booking)
 }
 
 func (h *BookingHandler) GetBookingsByUserID(w http.ResponseWriter, r *http.Request) {
@@ -92,45 +96,44 @@ func (h *BookingHandler) GetBookingsByUserID(w http.ResponseWriter, r *http.Requ
 
 	// Input validation
 	if _, err := uuid.Parse(userID); err != nil {
-		http.Error(w, "Invalid user ID", http.StatusBadRequest)
+		types.SendError(w, http.StatusBadRequest, "INVALID_USER_ID", "Invalid user ID format", nil)
 		return
 	}
 
 	bookings, err := h.BookingService.GetBookingsByUserID(userID)
 	if err != nil {
-		http.Error(w, "Failed to get bookings", http.StatusInternalServerError)
+		types.SendError(w, http.StatusInternalServerError, "RETRIEVAL_FAILED", "Failed to get bookings", nil)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(bookings)
+	types.SendSuccess(w, http.StatusOK, "Bookings retrieved successfully", bookings)
 }
 
 func (h *BookingHandler) CancelBooking(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(r.URL.Path, "/")
 	if len(parts) != 4 {
-		http.Error(w, "Invalid URL", http.StatusBadRequest)
+		types.SendError(w, http.StatusBadRequest, "INVALID_URL", "Invalid URL format", nil)
 		return
 	}
 
 	bookingID := parts[3]
 	if bookingID == "" {
-		http.Error(w, "Booking ID is required", http.StatusBadRequest)
+		types.SendError(w, http.StatusBadRequest, "MISSING_ID", "Booking ID is required", nil)
 		return
 	}
 
 	if _, err := uuid.Parse(bookingID); err != nil {
-		http.Error(w, "Invalid booking ID", http.StatusBadRequest)
+		types.SendError(w, http.StatusBadRequest, "INVALID_ID", "Invalid booking ID format", nil)
 		return
 	}
 
 	err := h.BookingService.CancelBooking(bookingID)
 	if err != nil {
-		http.Error(w, "Failed to cancel booking", http.StatusInternalServerError)
+		types.SendError(w, http.StatusInternalServerError, "CANCELLATION_FAILED", "Failed to cancel booking", nil)
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	types.SendSuccess(w, http.StatusOK, "Booking cancelled successfully", nil)
 }
 
 func (h *BookingHandler) HandleBookings(w http.ResponseWriter, r *http.Request) {
@@ -151,16 +154,11 @@ func (h *BookingHandler) HandleBookings(w http.ResponseWriter, r *http.Request) 
 				return
 			}
 		}
-		http.Error(w, "Invalid URL", http.StatusBadRequest)
+		types.SendError(w, http.StatusBadRequest, "INVALID_URL", "Invalid URL", nil)
 		return
 	case http.MethodDelete:
 		h.CancelBooking(w, r)
 	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		types.SendError(w, http.StatusMethodNotAllowed, "METHOD_NOT_ALLOWED", "Method not allowed", nil)
 	}
 }
-
-// func isValidUUID(u string) bool {
-// 	_, err := uuid.Parse(u)
-// 	return err == nil
-// }
